@@ -1,0 +1,9 @@
+{
+  "name": "reliant-stripe-webhook",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sandbox-only signed Stripe webhook receiver for Reliant Vehicle Protection",
+  "engines": {
+    "node": ">=20"
+  }
+}
