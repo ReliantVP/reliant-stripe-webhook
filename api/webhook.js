@@ -1,6 +1,29 @@
 const crypto = require("node:crypto");
 
-module.exports.config = { api: { bodyParser: false } };
+async function recordEvent(record) {
+  const url = process.env.SUPABASE_URL || "";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (!/^https:\/\/[^/]+\.supabase\.co\/?$/.test(url) || !key) {
+    throw new Error("Supabase sandbox ledger is not configured");
+  }
+  const response = await fetch(url.replace(/\/$/, "") + "/rest/v1/reliant_stripe_sandbox_events?on_conflict=stripe_event_id", {
+    method: "POST",
+    headers: {
+      "apikey": key,
+      "Authorization": "Bearer " + key,
+      "Content-Type": "application/json",
+      "Prefer": "resolution=ignore-duplicates,return=minimal"
+    },
+    body: JSON.stringify(record),
+    signal: AbortSignal.timeout(8000)
+  });
+  if (!response.ok) {
+    console.error("Stripe sandbox ledger write failed", { status: response.status });
+    throw new Error("Sandbox ledger write failed");
+  }
+}
+
+
 
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -41,22 +64,27 @@ module.exports = async function handler(req, res) {
   }
   const session = event.data?.object || {};
   if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
-    if (session.mode !== "payment" ||
-        session.metadata?.reliant_mode !== "internal_sandbox_test_no_coverage" ||
-        session.metadata?.contract_issuance !== "disabled" ||
-        session.amount_total !== 100 || session.currency !== "usd") {
-      console.info("Ignored unmatched sandbox session", { eventId: event.id, type: event.type });
-      return res.status(200).json({ received: true, ignored: true });
+    const matched = session.mode === "payment" &&
+      session.metadata?.reliant_mode === "internal_sandbox_test_no_coverage" &&
+      session.metadata?.contract_issuance === "disabled" &&
+      session.amount_total === 100 && session.currency === "usd";
+    const paymentStatus = !matched ? "ignored" : session.payment_status === "paid" ? "paid" : "unpaid";
+    try {
+      await recordEvent({
+        stripe_event_id: event.id,
+        stripe_session_id: typeof session.id === "string" ? session.id : null,
+        event_type: event.type,
+        payment_status: paymentStatus,
+        amount_cents: Number.isInteger(session.amount_total) ? session.amount_total : null,
+        currency: typeof session.currency === "string" ? session.currency : null,
+        coverage_issued: false
+      });
+    } catch (error) {
+      console.error("Sandbox payment event not acknowledged because persistence failed", { eventId: event.id });
+      return res.status(503).json({ error: "Payment event storage unavailable" });
     }
-    if (session.payment_status !== "paid") {
-      console.info("Sandbox session not yet paid", { eventId: event.id, sessionId: session.id });
-      return res.status(200).json({ received: true, paymentVerified: false });
-    }
-    console.info("Verified Reliant sandbox payment", {
-      eventId: event.id, sessionId: session.id, amountCents: 100,
-      currency: "usd", coverageIssued: false
-    });
-    return res.status(200).json({ received: true, paymentVerified: true, coverageIssued: false });
+    console.info("Recorded Stripe sandbox event", { eventId: event.id, sessionId: session.id, paymentStatus, coverageIssued: false });
+    return res.status(200).json({ received: true, paymentVerified: paymentStatus === "paid", coverageIssued: false });
   }
   return res.status(200).json({ received: true });
 };
