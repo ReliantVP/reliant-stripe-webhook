@@ -77,6 +77,12 @@ module.exports = async function handler(req, res) {
         payment_status: paymentStatus,
         amount_cents: Number.isInteger(session.amount_total) ? session.amount_total : null,
         currency: typeof session.currency === "string" ? session.currency : null,
+        sandbox_reference: typeof session.metadata?.sandbox_reference === "string" ? session.metadata.sandbox_reference : null,
+        coverage_tier: typeof session.metadata?.coverage_tier === "string" ? session.metadata.coverage_tier : null,
+        vehicle_label: typeof session.metadata?.vehicle_label === "string" ? session.metadata.vehicle_label : null,
+        quote_term_months: /^\\d+$/.test(session.metadata?.quote_term_months || "") ? Number(session.metadata.quote_term_months) : null,
+        quote_term_miles: /^\\d+$/.test(session.metadata?.quote_term_miles || "") ? Number(session.metadata.quote_term_miles) : null,
+        quoted_retail_cents: /^\\d+$/.test(session.metadata?.quoted_retail_cents || "") ? Number(session.metadata.quoted_retail_cents) : null,
         coverage_issued: false
       });
     } catch (error) {
