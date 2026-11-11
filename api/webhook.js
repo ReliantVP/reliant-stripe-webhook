@@ -77,6 +77,7 @@ module.exports = async function handler(req, res) {
         payment_status: paymentStatus,
         amount_cents: Number.isInteger(session.amount_total) ? session.amount_total : null,
         currency: typeof session.currency === "string" ? session.currency : null,
+        quote_session_id: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(session.metadata?.quote_session_id || "") ? session.metadata.quote_session_id : null,
         sandbox_reference: typeof session.metadata?.sandbox_reference === "string" ? session.metadata.sandbox_reference : null,
         coverage_tier: typeof session.metadata?.coverage_tier === "string" ? session.metadata.coverage_tier : null,
         vehicle_label: typeof session.metadata?.vehicle_label === "string" ? session.metadata.vehicle_label : null,
