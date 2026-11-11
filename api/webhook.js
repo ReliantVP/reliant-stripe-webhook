@@ -94,9 +94,9 @@ module.exports = async function handler(req, res) {
     // matching the server-created sandbox session. Legacy test events retain their ledger.
     if (matched && typeof session.metadata?.evidence_receipt_id === "string" && typeof session.id === "string") {
       try {
-        const url = (process.env.SUPABASE_URL || "").replace(/\\/$/, "");
+        const url = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
         const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-        if (!/^https:\\/\\/[^/]+\\.supabase\\.co$/.test(url) || !key) throw Error("Storage unavailable");
+        if (!/^https:\/\/[^/]+\.supabase\.co$/.test(url) || !key) throw Error("Storage unavailable");
         const auth = { apikey: key, Authorization: "Bearer " + key };
         const lookup = await fetch(url + "/rest/v1/reliant_uat_stripe_checkout_sessions?stripe_session_id=eq." + encodeURIComponent(session.id) + "&environment=eq.sandbox&select=evidence_receipt_id,amount_cents,currency,coverage_issued&limit=1", { headers: auth, signal: AbortSignal.timeout(8000) });
         if (!lookup.ok) throw Error("Checkout lookup failed");
