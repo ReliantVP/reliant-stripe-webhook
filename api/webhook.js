@@ -66,7 +66,7 @@ module.exports = async function handler(req, res) {
   if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
     const matched = session.mode === "payment" &&
       session.metadata?.reliant_mode === "internal_sandbox_test_no_coverage" &&
-      session.metadata?.contract_issuance === "disabled" &&
+      (session.metadata?.contract_issuance === "disabled" || session.metadata?.coverage_issuance === "disabled") &&
       session.amount_total === 100 && session.currency === "usd";
     const paymentStatus = !matched ? "ignored" : session.payment_status === "paid" ? "paid" : "unpaid";
     try {
@@ -89,6 +89,32 @@ module.exports = async function handler(req, res) {
     } catch (error) {
       console.error("Sandbox payment event not acknowledged because persistence failed", { eventId: event.id });
       return res.status(503).json({ error: "Payment event storage unavailable" });
+    }
+    // Evidence-linked checkout: persist a separate signature-verified receipt only after
+    // matching the server-created sandbox session. Legacy test events retain their ledger.
+    if (matched && typeof session.metadata?.evidence_receipt_id === "string" && typeof session.id === "string") {
+      try {
+        const url = (process.env.SUPABASE_URL || "").replace(/\\/$/, "");
+        const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+        if (!/^https:\\/\\/[^/]+\\.supabase\\.co$/.test(url) || !key) throw Error("Storage unavailable");
+        const auth = { apikey: key, Authorization: "Bearer " + key };
+        const lookup = await fetch(url + "/rest/v1/reliant_uat_stripe_checkout_sessions?stripe_session_id=eq." + encodeURIComponent(session.id) + "&environment=eq.sandbox&select=evidence_receipt_id,amount_cents,currency,coverage_issued&limit=1", { headers: auth, signal: AbortSignal.timeout(8000) });
+        if (!lookup.ok) throw Error("Checkout lookup failed");
+        const rows = await lookup.json();
+        if (rows.length !== 1 || rows[0].evidence_receipt_id !== session.metadata.evidence_receipt_id || rows[0].amount_cents !== 100 || rows[0].currency !== "usd" || rows[0].coverage_issued) {
+          return res.status(409).json({ error: "Unmatched evidence-linked checkout" });
+        }
+        const stored = await fetch(url + "/rest/v1/reliant_uat_verified_stripe_webhook_receipts", {
+          method: "POST",
+          headers: { ...auth, "Content-Type": "application/json", Prefer: "resolution=ignore-duplicates,return=minimal" },
+          body: JSON.stringify({ stripe_event_id: event.id, stripe_session_id: session.id, evidence_receipt_id: rows[0].evidence_receipt_id, event_type: event.type, payment_status: session.payment_status === "paid" ? "paid" : "unpaid", amount_cents: 100, currency: "usd", signature_verified: true, environment: "sandbox", coverage_issued: false }),
+          signal: AbortSignal.timeout(8000)
+        });
+        if (!stored.ok) throw Error("Verified receipt persistence failed");
+      } catch (error) {
+        console.error("Verified webhook receipt persistence failed", { eventId: event.id });
+        return res.status(503).json({ error: "Verified receipt persistence failed" });
+      }
     }
     console.info("Recorded Stripe sandbox event", { eventId: event.id, sessionId: session.id, paymentStatus, coverageIssued: false });
     return res.status(200).json({ received: true, paymentVerified: paymentStatus === "paid", coverageIssued: false });
